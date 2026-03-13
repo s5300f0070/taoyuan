@@ -1,0 +1,1352 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>排班管理系統</title>
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- html2canvas for Image Export -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    
+    <style>
+        body {
+            font-family: 'Noto Sans TC', sans-serif;
+            background-color: #f1f5f9; 
+            -webkit-tap-highlight-color: transparent;
+        }
+        .shift-cell {
+            transition: all 0.2s;
+        }
+        .shift-cell:active {
+            transform: scale(0.90);
+        }
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+        .custom-scroll::-webkit-scrollbar {
+            height: 6px;
+            width: 6px;
+        }
+        .custom-scroll::-webkit-scrollbar-track {
+            background: #f1f5f9; 
+        }
+        .custom-scroll::-webkit-scrollbar-thumb {
+            background: #94a3b8; 
+            border-radius: 4px;
+        }
+        .custom-scroll::-webkit-scrollbar-thumb:hover {
+            background: #64748b; 
+        }
+        select {
+            background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%2364748b' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+            background-position: right 0.5rem center;
+            background-repeat: no-repeat;
+            background-size: 1.5em 1.5em;
+            padding-right: 2.5rem;
+            -webkit-appearance: none;
+            appearance: none;
+        }
+        .sticky-col-header { z-index: 30 !important; }
+        .sticky-col-cell { z-index: 20 !important; }
+        
+        /* Modal Animation */
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes slideIn { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        .modal-overlay { animation: fadeIn 0.2s ease-out; }
+        .modal-content { animation: slideIn 0.3s ease-out; }
+        .animate-slideIn { animation: slideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        // ================= CONFIGURATION =================
+        const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzqLyn8Z0-I-7NR6AiTp5EWxcHP_fGl8IchHKo0Bn6iQv--IaPoaes5jmISToOchdyI/exec"; 
+        // =================================================
+
+        const { useState, useEffect, useMemo, useRef } = React;
+
+        // 計算最佳文字顏色對比度 (黑/白)
+        const getContrastYIQ = (hexcolor) => {
+            if (!hexcolor) return '#334155';
+            hexcolor = hexcolor.replace("#", "");
+            if (hexcolor.length === 3) hexcolor = hexcolor.split('').map(c => c+c).join('');
+            const r = parseInt(hexcolor.substr(0,2),16);
+            const g = parseInt(hexcolor.substr(2,2),16);
+            const b = parseInt(hexcolor.substr(4,2),16);
+            const yiq = ((r*299)+(g*587)+(b*114))/1000;
+            return (yiq >= 128) ? '#1e293b' : '#ffffff'; 
+        };
+
+        const parseMonthToNum = (monthStr) => {
+            if (!monthStr) return null;
+            const cleanStr = String(monthStr).trim();
+            if (/^\d{5,6}$/.test(cleanStr)) {
+                return parseInt(cleanStr.substring(0, 4)) * 100 + parseInt(cleanStr.substring(4));
+            }
+            const match = cleanStr.match(/(\d{4})[^\d]*(\d{1,2})/);
+            if (match) return parseInt(match[1]) * 100 + parseInt(match[2]);
+            return null;
+        };
+
+        const AdminLoginModal = ({ isOpen, onClose, onLogin, actualPassword, tempUser }) => {
+            const [password, setPassword] = useState("");
+            const [error, setError] = useState("");
+            const inputRef = useRef(null);
+
+            useEffect(() => {
+                if (isOpen) {
+                    setPassword("");
+                    setError("");
+                    setTimeout(() => inputRef.current?.focus(), 100);
+                }
+            }, [isOpen]);
+
+            if (!isOpen) return null;
+
+            const handleSubmit = () => {
+                if (password === actualPassword) {
+                    onLogin();
+                } else {
+                    setError("密碼錯誤");
+                    setPassword("");
+                }
+            };
+
+            return (
+                <div className="fixed inset-0 z-[70] flex items-center justify-center px-4 modal-overlay">
+                    <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={onClose}></div>
+                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-xs overflow-hidden modal-content relative z-10">
+                        <div className="bg-slate-800 text-white px-4 py-3 flex justify-between items-center">
+                            <h3 className="font-bold text-lg"><i className="fa-solid fa-user-shield mr-2"></i>管理員驗證</h3>
+                            <button onClick={onClose} className="text-slate-400 hover:text-white"><i className="fa-solid fa-xmark text-xl"></i></button>
+                        </div>
+                        <div className="p-5">
+                            <p className="text-sm text-slate-600 mb-3">登入身分：<span className="font-bold text-blue-600">{tempUser}</span></p>
+                            <input 
+                                ref={inputRef}
+                                type="password" 
+                                pattern="[0-9]*" 
+                                inputMode="numeric"
+                                value={password}
+                                onChange={(e) => { setPassword(e.target.value); setError(""); }}
+                                className="w-full border rounded-lg px-3 py-2 text-center text-lg tracking-widest focus:outline-none focus:ring-2 focus:ring-blue-500 border-slate-300"
+                                onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
+                                placeholder="請輸入密碼"
+                            />
+                            {error && <p className="text-red-500 text-xs mt-2 text-center font-bold">{error}</p>}
+                            <button onClick={handleSubmit} className="w-full mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-bold shadow-md hover:bg-blue-700 transition-colors">
+                                登入管理模式
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const AdminDashboardModal = ({ isOpen, onClose, storesConfig, employeesConfig, shiftsConfig, colorsConfig, refreshConfig }) => {
+            const [activeTab, setActiveTab] = useState("shifts");
+            const [localStores, setLocalStores] = useState([]);
+            const [localEmployees, setLocalEmployees] = useState([]);
+            const [localShifts, setLocalShifts] = useState([]);
+            const [isSaving, setIsSaving] = useState(false);
+
+            useEffect(() => {
+                if (isOpen) {
+                    setLocalStores(JSON.parse(JSON.stringify(storesConfig || [])));
+                    setLocalEmployees(JSON.parse(JSON.stringify(employeesConfig || [])));
+                    setLocalShifts(JSON.parse(JSON.stringify(shiftsConfig || [])));
+                }
+            }, [isOpen, storesConfig, employeesConfig, shiftsConfig]);
+
+            if (!isOpen) return null;
+
+            const handleSave = async (type) => {
+                setIsSaving(true);
+                try {
+                    let action = '';
+                    let payload = [];
+                    if (type === 'stores') { action = 'saveStores'; payload = localStores; }
+                    else if (type === 'employees') { action = 'saveEmployees'; payload = localEmployees; }
+                    else if (type === 'shifts') { action = 'saveShifts'; payload = localShifts; }
+
+                    const response = await fetch(APPS_SCRIPT_URL, {
+                        method: "POST",
+                        headers: { "Content-Type": "text/plain;charset=utf-8" },
+                        body: JSON.stringify({ action, data: payload })
+                    });
+                    const result = await response.json();
+                    if (result.status === "success") {
+                        alert("儲存成功！");
+                        refreshConfig();
+                    } else alert("儲存失敗：" + result.message);
+                } catch (e) {
+                    alert("連線失敗，無法儲存");
+                } finally {
+                    setIsSaving(false);
+                }
+            };
+
+            const addStore = () => setLocalStores([...localStores, { store: "新分店", maxSimLeave: "1", minMandLeave: "4" }]);
+            const delStore = (idx) => setLocalStores(localStores.filter((_, i) => i !== idx));
+            const updateStore = (idx, field, val) => {
+                const newStores = [...localStores];
+                newStores[idx][field] = val;
+                setLocalStores(newStores);
+            };
+
+            const addEmployee = () => setLocalEmployees([...localEmployees, { store: localStores[0]?.store || "", title: "正職", name: "新員工", startMonth: "", endMonth: "" }]);
+            const updateEmployee = (idx, field, val) => {
+                const newEmp = [...localEmployees];
+                newEmp[idx][field] = val;
+                setLocalEmployees(newEmp);
+            };
+
+            const addShift = () => setLocalShifts([...localShifts, { type: "新班別", colorName: colorsConfig[0]?.name || "", hex: colorsConfig[0]?.hex || "#E2E8F0" }]);
+            const delShift = (idx) => setLocalShifts(localShifts.filter((_, i) => i !== idx));
+            const updateShiftConfig = (idx, field, val) => {
+                const newShifts = [...localShifts];
+                newShifts[idx][field] = val;
+                if (field === 'colorName') {
+                    const matchedColor = colorsConfig.find(c => c.name === val);
+                    newShifts[idx].hex = matchedColor ? matchedColor.hex : "#E2E8F0";
+                }
+                setLocalShifts(newShifts);
+            };
+
+            return (
+                <div className="fixed inset-0 z-[60] flex flex-col items-center justify-center p-4 modal-overlay bg-slate-900/80">
+                    <div className="w-full max-w-4xl bg-white rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+                        <div className="bg-slate-800 text-white px-4 py-3 flex justify-between items-center shrink-0">
+                            <h3 className="font-bold text-lg"><i className="fa-solid fa-cogs mr-2"></i>管理員後台設定</h3>
+                            <button onClick={onClose} disabled={isSaving} className="text-slate-400 hover:text-white"><i className="fa-solid fa-xmark text-xl"></i></button>
+                        </div>
+                        
+                        <div className="flex bg-slate-100 border-b border-slate-200 shrink-0">
+                            <button onClick={() => setActiveTab('shifts')} className={`flex-1 py-3 font-bold text-sm transition-colors ${activeTab === 'shifts' ? 'bg-white text-blue-600 border-b-2 border-blue-600' : 'text-slate-500 hover:bg-slate-200'}`}>班別設定</button>
+                            <button onClick={() => setActiveTab('stores')} className={`flex-1 py-3 font-bold text-sm transition-colors ${activeTab === 'stores' ? 'bg-white text-blue-600 border-b-2 border-blue-600' : 'text-slate-500 hover:bg-slate-200'}`}>分店資料管理</button>
+                            <button onClick={() => setActiveTab('employees')} className={`flex-1 py-3 font-bold text-sm transition-colors ${activeTab === 'employees' ? 'bg-white text-blue-600 border-b-2 border-blue-600' : 'text-slate-500 hover:bg-slate-200'}`}>員工資料管理</button>
+                        </div>
+
+                        <div className="flex-1 overflow-auto p-4 bg-slate-50">
+                            
+                            {activeTab === 'shifts' && (
+                                <div>
+                                    <div className="flex justify-between items-center mb-3">
+                                        <h4 className="font-bold text-slate-700">班別資料管理</h4>
+                                        <button onClick={addShift} className="bg-emerald-500 text-white px-3 py-1 rounded text-sm hover:bg-emerald-600"><i className="fa-solid fa-plus mr-1"></i>新增班別</button>
+                                    </div>
+                                    <div className="w-full overflow-x-auto border border-slate-200 rounded-lg shadow-sm bg-white">
+                                        <table className="w-full text-sm min-w-[500px]">
+                                            <thead className="bg-slate-200 text-slate-700 whitespace-nowrap">
+                                                <tr><th className="p-2 text-left">班別代碼 (例如: 1200)</th><th className="p-2 text-left">顯示顏色</th><th className="p-2 text-center w-24">顏色預覽</th><th className="p-2 text-center w-16">操作</th></tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-100">
+                                                {localShifts.map((s, i) => (
+                                                    <tr key={i} className="hover:bg-slate-50 transition-colors">
+                                                        <td className="p-2"><input className="border p-1 w-full rounded" value={s.type} onChange={e => updateShiftConfig(i, 'type', e.target.value)} /></td>
+                                                        <td className="p-2">
+                                                            <select className="border p-1 w-full rounded" value={s.colorName} onChange={e => updateShiftConfig(i, 'colorName', e.target.value)}>
+                                                                <option value="">請選擇顏色</option>
+                                                                {colorsConfig.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                                                            </select>
+                                                        </td>
+                                                        <td className="p-2 text-center">
+                                                            <div className="w-8 h-8 rounded border shadow-sm mx-auto flex items-center justify-center text-[10px]" style={{backgroundColor: s.hex || '#E2E8F0', color: getContrastYIQ(s.hex || '#E2E8F0')}}>{s.type.substring(0,2)}</div>
+                                                        </td>
+                                                        <td className="p-2 text-center"><button onClick={() => delShift(i)} className="text-red-500 hover:text-red-700"><i className="fa-solid fa-trash"></i></button></td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    <p className="text-xs text-blue-500 mt-2">* 顏色清單對應於試算表中的 [班別顏色選單]。</p>
+                                    <button onClick={() => handleSave('shifts')} disabled={isSaving} className="mt-4 w-full bg-blue-600 text-white py-2 rounded font-bold hover:bg-blue-700 disabled:opacity-50 transition-colors">{isSaving ? '儲存中...' : '儲存班別設定'}</button>
+                                </div>
+                            )}
+
+                            {activeTab === 'stores' && (
+                                <div>
+                                    <div className="flex justify-between items-center mb-2">
+                                        <h4 className="font-bold text-slate-700">分店畫休限制設定</h4>
+                                        <button onClick={addStore} className="bg-emerald-500 text-white px-3 py-1 rounded text-sm hover:bg-emerald-600"><i className="fa-solid fa-plus mr-1"></i>新增分店</button>
+                                    </div>
+                                    <div className="w-full overflow-x-auto border border-slate-200 rounded-lg shadow-sm bg-white">
+                                        <table className="w-full text-sm min-w-[500px]">
+                                            <thead className="bg-slate-200 text-slate-700 whitespace-nowrap">
+                                                <tr><th className="p-2 text-left">店別</th><th className="p-2 text-left">同時休限制 (人)</th><th className="p-2 text-left">單人單月必休限制 (天)</th><th className="p-2 text-center">操作</th></tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-100">
+                                                {localStores.map((s, i) => (
+                                                    <tr key={i} className="hover:bg-slate-50 transition-colors">
+                                                        <td className="p-2"><input className="border p-1 w-full rounded" value={s.store} onChange={e => updateStore(i, 'store', e.target.value)} /></td>
+                                                        <td className="p-2"><input type="number" className="border p-1 w-full rounded" value={s.maxSimLeave} onChange={e => updateStore(i, 'maxSimLeave', e.target.value)} /></td>
+                                                        <td className="p-2"><input type="number" className="border p-1 w-full rounded" value={s.minMandLeave} onChange={e => updateStore(i, 'minMandLeave', e.target.value)} /></td>
+                                                        <td className="p-2 text-center"><button onClick={() => delStore(i)} className="text-red-500 hover:text-red-700"><i className="fa-solid fa-trash"></i></button></td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    <button onClick={() => handleSave('stores')} disabled={isSaving} className="mt-4 w-full bg-blue-600 text-white py-2 rounded font-bold hover:bg-blue-700 disabled:opacity-50 transition-colors">{isSaving ? '儲存中...' : '儲存分店設定'}</button>
+                                </div>
+                            )}
+
+                            {activeTab === 'employees' && (
+                                <div>
+                                    <div className="flex justify-between items-center mb-2">
+                                        <h4 className="font-bold text-slate-700">員工出缺勤名單設定</h4>
+                                        <button onClick={addEmployee} className="bg-emerald-500 text-white px-3 py-1 rounded text-sm hover:bg-emerald-600"><i className="fa-solid fa-plus mr-1"></i>新增員工</button>
+                                    </div>
+                                    <div className="w-full overflow-x-auto border border-slate-200 rounded-lg shadow-sm bg-white">
+                                        <table className="w-full text-sm min-w-[750px]">
+                                            <thead className="bg-slate-200 text-slate-700 whitespace-nowrap">
+                                                <tr>
+                                                    <th className="p-2 text-left w-24">店別</th>
+                                                    <th className="p-2 text-left w-24">職位</th>
+                                                    <th className="p-2 text-left w-28">姓名</th>
+                                                    <th className="p-2 text-left w-40">開始月 (例: 202603)</th>
+                                                    <th className="p-2 text-left w-40">離職月 (例: 202605)</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-100">
+                                                {localEmployees.map((e, i) => (
+                                                    <tr key={i} className="hover:bg-slate-50 transition-colors">
+                                                        <td className="p-2">
+                                                            <select className="border p-1 w-full rounded min-w-[80px]" value={e.store} onChange={evt => updateEmployee(i, 'store', evt.target.value)}>
+                                                                {localStores.map(s => <option key={s.store} value={s.store}>{s.store}</option>)}
+                                                            </select>
+                                                        </td>
+                                                        <td className="p-2"><input className="border p-1 w-full rounded min-w-[80px]" value={e.title} onChange={evt => updateEmployee(i, 'title', evt.target.value)} /></td>
+                                                        <td className="p-2"><input className="border p-1 w-full rounded min-w-[100px]" value={e.name} onChange={evt => updateEmployee(i, 'name', evt.target.value)} /></td>
+                                                        <td className="p-2"><input className="border p-1 w-full rounded min-w-[140px]" placeholder="格式: 202603" value={e.startMonth} onChange={evt => updateEmployee(i, 'startMonth', evt.target.value)} /></td>
+                                                        <td className="p-2"><input className="border p-1 w-full rounded min-w-[140px]" placeholder="格式: 202605" value={e.endMonth} onChange={evt => updateEmployee(i, 'endMonth', evt.target.value)} /></td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    <button onClick={() => handleSave('employees')} disabled={isSaving} className="mt-4 w-full bg-blue-600 text-white py-2 rounded font-bold hover:bg-blue-700 disabled:opacity-50 transition-colors">{isSaving ? '儲存中...' : '儲存員工設定'}</button>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const ReasonModal = ({ isOpen, onClose, onConfirm, date, isMandatory }) => {
+            const [reason, setReason] = useState("");
+            const [error, setError] = useState("");
+            const inputRef = useRef(null);
+
+            useEffect(() => {
+                if (isOpen) {
+                    setReason("");
+                    setError("");
+                    setTimeout(() => inputRef.current?.focus(), 100);
+                }
+            }, [isOpen]);
+
+            if (!isOpen) return null;
+
+            const handleSubmit = () => {
+                if (isMandatory && !reason.trim()) {
+                    setError("此為必填項目");
+                    return;
+                }
+                onConfirm(reason);
+            };
+
+            return (
+                <div className="fixed inset-0 z-[70] flex items-center justify-center px-4 modal-overlay">
+                    <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={onClose}></div>
+                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden modal-content relative z-10">
+                        <div className="bg-slate-800 text-white px-4 py-3 flex justify-between items-center">
+                            <h3 className="font-bold text-lg"><i className="fa-solid fa-pen-to-square mr-2"></i>畫休確認</h3>
+                            <button onClick={onClose} className="text-slate-400 hover:text-white"><i className="fa-solid fa-xmark text-xl"></i></button>
+                        </div>
+                        <div className="p-5">
+                            <div className="mb-4">
+                                <p className="text-slate-600 mb-1 font-medium">日期：<span className="text-slate-900 font-bold">{date}</span></p>
+                                {isMandatory ? (
+                                    <div className="bg-red-50 text-red-600 text-xs px-2 py-1 rounded border border-red-100 flex items-center gap-1">
+                                        <i className="fa-solid fa-circle-exclamation"></i>
+                                        <span>本月已畫休達上限，原因為必填。</span>
+                                    </div>
+                                ) : (
+                                    <div className="text-xs text-slate-400">原因可選填。</div>
+                                )}
+                            </div>
+                            
+                            <label className="block text-sm font-medium text-slate-700 mb-1">
+                                休假原因 {isMandatory && <span className="text-red-500">*</span>}
+                            </label>
+                            <input 
+                                ref={inputRef}
+                                type="text" 
+                                value={reason}
+                                onChange={(e) => { setReason(e.target.value); setError(""); }}
+                                placeholder={isMandatory ? "請輸入原因 (必填)" : "例如: 處理私事 (選填)"}
+                                className={`w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 transition-all ${error ? 'border-red-500 focus:ring-red-200' : 'border-slate-300 focus:border-blue-500 focus:ring-blue-100'}`}
+                                onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
+                            />
+                            {error && <p className="text-red-500 text-xs mt-1">{error}</p>}
+                            
+                            <div className="flex gap-3 mt-6">
+                                <button onClick={onClose} className="flex-1 px-4 py-2 border border-slate-300 text-slate-600 rounded-lg text-sm hover:bg-slate-50 transition-colors">取消</button>
+                                <button onClick={handleSubmit} className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-bold shadow-md hover:bg-blue-700 transition-colors">確定畫休</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const CalendarExportModal = ({ isOpen, onClose, userData, monthStr, scheduleDates, rawSchedule, shiftsConfig }) => {
+            const [generating, setGenerating] = useState(false);
+
+            if (!isOpen || !userData) return null;
+
+            let year = new Date().getFullYear();
+            let monthIndex = new Date().getMonth();
+            if (monthStr) {
+                const numStr = String(monthStr).replace(/[^0-9]/g, '');
+                if (numStr.length >= 5) {
+                    year = parseInt(numStr.substring(0, 4), 10);
+                    monthIndex = parseInt(numStr.substring(4), 10) - 1;
+                }
+            }
+            
+            const firstDay = new Date(year, monthIndex, 1).getDay(); 
+            const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+
+            const shiftMapping = {};
+            const userShifts = rawSchedule?.find(u => u.name === userData.name)?.shifts || userData.shifts || {};
+
+            scheduleDates.forEach(dStr => {
+                let safeStr = String(dStr).replace(/-/g, "/").trim();
+                if (!/^\d{4}/.test(safeStr)) {
+                    safeStr = `${year}/${safeStr}`;
+                }
+                const dateObj = new Date(safeStr);
+                if (!isNaN(dateObj.getTime())) {
+                    shiftMapping[dateObj.getDate()] = userShifts[dStr] || null;
+                }
+            });
+
+            const calendarCells = [];
+            for (let i = 0; i < firstDay; i++) {
+                calendarCells.push(null);
+            }
+            for (let i = 1; i <= daysInMonth; i++) {
+                calendarCells.push({
+                    day: i,
+                    shiftData: shiftMapping[i] || null
+                });
+            }
+
+            const handleDownload = async () => {
+                const captureNode = document.getElementById("calendar-capture-area");
+                if (!captureNode) return;
+                setGenerating(true);
+                try {
+                    const canvas = await html2canvas(captureNode, { 
+                        scale: 3, 
+                        backgroundColor: '#ffffff',
+                        logging: false,
+                        useCORS: true
+                    });
+                    const link = document.createElement("a");
+                    link.download = `${userData.name}_${year}年${monthIndex + 1}月_班表.png`;
+                    link.href = canvas.toDataURL("image/png");
+                    link.click();
+                } catch (err) {
+                    alert("產生圖片失敗，請稍後再試。");
+                } finally {
+                    setGenerating(false);
+                }
+            };
+
+            const weekDays = ["日", "一", "二", "三", "四", "五", "六"];
+
+            return (
+                <div className="fixed inset-0 z-[70] flex flex-col items-center justify-center p-2 md:p-4 modal-overlay bg-slate-900/80">
+                    <div className="w-full max-w-3xl bg-slate-100 rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[95vh] md:max-h-[90vh]">
+                        <div className="bg-slate-800 text-white px-4 py-3 flex justify-between items-center shrink-0">
+                            <h3 className="font-bold text-base md:text-lg"><i className="fa-regular fa-calendar-days mr-2"></i>匯出個人班表</h3>
+                            <button onClick={onClose} disabled={generating} className="text-slate-400 hover:text-white disabled:opacity-50">
+                                <i className="fa-solid fa-xmark text-xl"></i>
+                            </button>
+                        </div>
+                        
+                        <div className="flex-1 overflow-y-auto p-2 md:p-4 bg-slate-200 flex items-center justify-center">
+                            <div className="w-full max-w-2xl">
+                                <div id="calendar-capture-area" className="bg-white p-2 md:p-4 shadow-sm w-full font-sans relative">
+                                    <div className="text-center mb-3 md:mb-4">
+                                        <h2 className="text-base md:text-xl font-black text-slate-800 tracking-wider">個人班表</h2>
+                                        <div className="text-xs md:text-base font-bold text-slate-600 mt-1">
+                                            {year}年{monthIndex + 1}月 <span className="mx-2 text-slate-300">|</span> <span className="text-blue-700">{userData.name}</span>
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-7 border-t border-l border-slate-800">
+                                        {weekDays.map((wd, i) => (
+                                            <div key={wd} className={`py-1.5 text-center font-bold text-[10px] md:text-sm border-b border-r border-slate-800 ${i === 0 || i === 6 ? 'text-red-600 bg-red-50' : 'text-slate-700 bg-slate-100'}`}>
+                                                {wd}
+                                            </div>
+                                        ))}
+                                        
+                                        {calendarCells.map((cell, idx) => {
+                                            const isWeekend = idx % 7 === 0 || idx % 7 === 6;
+                                            return (
+                                                <div key={idx} className={`h-10 sm:h-14 md:h-[4.5rem] p-0.5 border-b border-r border-slate-800 flex flex-col ${cell ? 'bg-white' : 'bg-slate-50'}`}>
+                                                    {cell && (
+                                                        <>
+                                                            <div className={`text-[9px] md:text-xs font-bold pl-0.5 ${isWeekend ? 'text-red-500' : 'text-slate-700'}`}>
+                                                                {cell.day}
+                                                            </div>
+                                                            <div className="flex-1 flex items-center justify-center mt-0.5 w-full h-full overflow-hidden">
+                                                                {cell.shiftData && cell.shiftData.type && (() => {
+                                                                    const type = cell.shiftData.type;
+                                                                    let bgHex = '#E2E8F0';
+                                                                    let textHex = '#334155';
+                                                                    let borderClass = 'border-black/10';
+                                                                    
+                                                                    const shiftDef = shiftsConfig?.find(s => s.type === type);
+                                                                    
+                                                                    if (shiftDef) {
+                                                                        bgHex = shiftDef.hex;
+                                                                        textHex = getContrastYIQ(bgHex);
+                                                                    } else if (type === "休") {
+                                                                        bgHex = '#fef08a';
+                                                                        textHex = '#ef4444';
+                                                                        borderClass = 'border-yellow-400';
+                                                                    }
+
+                                                                    return (
+                                                                        <div 
+                                                                            className={`w-full h-full flex items-center justify-center rounded-sm shadow-sm px-0.5 border ${borderClass}`} 
+                                                                            style={{backgroundColor: bgHex, color: textHex}}
+                                                                        >
+                                                                            <span className="text-center text-[9px] md:text-[11px] leading-none font-medium tracking-tight">
+                                                                                {type === '休' ? <i className="fa-solid fa-bed"></i> : type}
+                                                                            </span>
+                                                                        </div>
+                                                                    );
+                                                                })()}
+                                                            </div>
+                                                        </>
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                    <div className="mt-2 text-right text-[9px] md:text-xs text-slate-400 font-medium">
+                                        Generated by 排班系統
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="p-3 md:p-4 bg-white border-t border-slate-200 shrink-0 flex gap-3">
+                            <button onClick={onClose} disabled={generating} className="flex-1 py-2 md:py-3 bg-slate-100 text-slate-700 font-bold rounded-lg text-sm md:text-base hover:bg-slate-200 transition disabled:opacity-50">
+                                取消
+                            </button>
+                            <button onClick={handleDownload} disabled={generating} className="flex-[2] py-2 md:py-3 bg-blue-600 text-white font-bold rounded-lg shadow-md text-sm md:text-base hover:bg-blue-700 transition flex items-center justify-center disabled:opacity-70 disabled:cursor-wait">
+                                {generating ? <><i className="fa-solid fa-spinner fa-spin mr-2"></i>產生中...</> : <><i className="fa-solid fa-download mr-2"></i>下載圖檔</>}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const ShiftBadge = ({ data, onClick, isEditable, isSmall, viewMode, shiftsConfig, isSelected }) => {
+            const type = data ? String(data.type) : ""; 
+            const note = data ? data.note : "";
+            const hasNote = note && note.trim() !== "";
+
+            let bgHex = "";
+            let textHex = "";
+            let defaultClass = "bg-slate-50 text-slate-300";
+            let content = type; 
+
+            const shiftDef = shiftsConfig?.find(s => s.type === type);
+
+            if (shiftDef) {
+                bgHex = shiftDef.hex;
+                textHex = getContrastYIQ(bgHex);
+                defaultClass = "font-medium tracking-wide shadow-sm border border-black/10";
+            } else if (type === "休") {
+                defaultClass = "bg-yellow-100 text-red-500 border border-yellow-200 font-bold shadow-sm";
+                content = <i className="fa-solid fa-bed"></i>; 
+            } else if (type) {
+                defaultClass = "bg-slate-200 text-slate-700 border border-slate-300 shadow-sm";
+            } else if ((isEditable && viewMode === 'edit') || viewMode === 'shift') {
+                defaultClass = "bg-white border border-dashed border-slate-300 active:bg-slate-100 cursor-pointer hover:border-blue-400";
+                content = <i className="fa-solid fa-plus text-slate-200 scale-75"></i>;
+            }
+
+            const sizeClass = isSmall ? "w-8 h-8 text-xs rounded-lg" : "w-10 h-10 md:w-11 md:h-11 text-xs md:text-sm rounded-lg";
+            const textSizeClass = (type.length >= 4 && !isSmall) ? "text-[10px] md:text-xs" : "";
+            const selectionRing = isSelected ? "ring-2 ring-blue-600 ring-offset-1 scale-110 shadow-lg z-10" : "";
+
+            const customStyle = bgHex ? { backgroundColor: bgHex, color: textHex } : {};
+
+            const handleClick = () => {
+                if (viewMode === 'shift' || (isEditable && viewMode === 'edit')) {
+                    onClick();
+                } else if (hasNote) {
+                    alert(`📅 休假原因：\n${note}`);
+                }
+            };
+
+            return (
+                <div 
+                    onClick={handleClick}
+                    className={`${defaultClass} ${sizeClass} ${textSizeClass} ${selectionRing} ${((isEditable && viewMode === 'edit') || viewMode === 'shift' || hasNote) ? 'cursor-pointer' : ''} flex items-center justify-center transition-all duration-200 mx-auto relative font-sans tracking-tight`}
+                    style={customStyle}
+                    title={note} 
+                >
+                    <span className="text-center leading-none">{content}</span>
+                    {hasNote && (
+                        <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500 border-2 border-white"></span>
+                        </span>
+                    )}
+                </div>
+            );
+        };
+
+        const App = () => {
+            const [initLoading, setInitLoading] = useState(true);
+            const [scheduleLoading, setScheduleLoading] = useState(false);
+            const [months, setMonths] = useState([]);
+            const [currentMonth, setCurrentMonth] = useState("");
+            const [scheduleData, setScheduleData] = useState({ dates: [], schedule: [] });
+            
+            // 設定狀態
+            const [storesConfig, setStoresConfig] = useState([]);
+            const [employeesConfig, setEmployeesConfig] = useState([]);
+            const [shiftsConfig, setShiftsConfig] = useState([]);
+            const [colorsConfig, setColorsConfig] = useState([]);
+            const [adminPassword, setAdminPassword] = useState("");
+            
+            const [currentUser, setCurrentUser] = useState("");
+            const [tempAdminUser, setTempAdminUser] = useState("");
+            const [isAdmin, setIsAdmin] = useState(false); 
+            const [showAdminLogin, setShowAdminLogin] = useState(false); 
+            const [showAdminDashboard, setShowAdminDashboard] = useState(false);
+            const [showCalendarModal, setShowCalendarModal] = useState(false); 
+
+            // 模式狀態：'view'(瀏覽), 'edit'(畫休), 'shift'(排班/編輯班別)
+            const [viewMode, setViewMode] = useState("view"); 
+            const [statusMsg, setStatusMsg] = useState("");
+            
+            const [filterStore, setFilterStore] = useState("all");
+            const [showFilters, setShowFilters] = useState(false);
+            const [zoomLevel, setZoomLevel] = useState(1); 
+
+            const [modalConfig, setModalConfig] = useState({ isOpen: false, name: "", date: "", isMandatory: false });
+
+            // 編輯班別模式專用狀態
+            const [selectedCells, setSelectedCells] = useState([]);
+            const [batchShiftType, setBatchShiftType] = useState("");
+
+            const tableContainerRef = useRef(null);
+
+            useEffect(() => { initApp(); }, []);
+            useEffect(() => { if (currentMonth) fetchSchedule(currentMonth); }, [currentMonth]);
+
+            const initApp = async () => {
+                setInitLoading(true);
+                try {
+                    const [resConfig, resMonths] = await Promise.all([
+                        fetch(`${APPS_SCRIPT_URL}?action=getConfig&_t=${new Date().getTime()}`).then(r => r.json()),
+                        fetch(`${APPS_SCRIPT_URL}?action=getMonths&_t=${new Date().getTime()}`).then(r => r.json())
+                    ]);
+                    
+                    if (resConfig.status === "success") {
+                        setStoresConfig(resConfig.stores || []);
+                        setEmployeesConfig(resConfig.employees || []);
+                        setShiftsConfig(resConfig.shifts || []);
+                        setColorsConfig(resConfig.colors || []);
+                        setAdminPassword(resConfig.adminPassword || "");
+                    } else {
+                        setStatusMsg(`⚠️ 後端連線異常，請確認 Apps Script 是否已更新並發佈為新版本！`);
+                    }
+                    
+                    if (resMonths.status === "success") {
+                        setMonths(resMonths.months);
+                        const now = new Date();
+                        const y = now.getFullYear();
+                        const m = now.getMonth() + 1;
+                        const mPad = String(m).padStart(2, '0');
+                        const possibleTargets = [`${y}年${m}月`, `${y}年${mPad}月`, `${y}-${mPad}`, `${y}-${m}`, `${y}${mPad}`, `${y}/${mPad}`, `${y}/${m}`];
+                        const matchedTarget = resMonths.months.find(month => possibleTargets.includes(month));
+                        
+                        if (matchedTarget) setCurrentMonth(matchedTarget);
+                        else if (resMonths.currentMonth && resMonths.months.includes(resMonths.currentMonth)) setCurrentMonth(resMonths.currentMonth);
+                        else if (resMonths.months.length > 0) setCurrentMonth(resMonths.months[resMonths.months.length - 1]);
+                    }
+                } catch(e) { 
+                    setStatusMsg("系統初始化連線錯誤，請確認後端網址"); 
+                }
+                setInitLoading(false);
+            };
+
+            const fetchSchedule = async (month) => {
+                setScheduleLoading(true);
+                setScheduleData({ dates: [], schedule: [] }); 
+                try {
+                    const response = await fetch(`${APPS_SCRIPT_URL}?action=getSchedule&sheetName=${encodeURIComponent(month)}&_t=${new Date().getTime()}`);
+                    const data = await response.json();
+                    if (data.status === "success") {
+                        setScheduleData({ dates: data.dates, schedule: data.schedule });
+                    } else {
+                        setStatusMsg(`讀取失敗: ${data.message}`);
+                    }
+                } catch (e) {
+                    setStatusMsg("連線錯誤 (取得班表失敗)");
+                } finally {
+                    setScheduleLoading(false);
+                }
+            };
+
+            const handleUserChange = (e) => {
+                const selectedName = e.target.value;
+                const selectedEmp = employeesConfig.find(emp => emp.name === selectedName);
+                
+                if (selectedEmp && selectedEmp.title && selectedEmp.title.includes("店長")) {
+                    setTempAdminUser(selectedName);
+                    setShowAdminLogin(true);
+                } else {
+                    setIsAdmin(false); 
+                    setCurrentUser(selectedName);
+                    if (viewMode === 'shift') {
+                        setViewMode('view');
+                        setSelectedCells([]);
+                    }
+                }
+            };
+
+            const handleAdminSuccess = () => {
+                setIsAdmin(true);
+                setCurrentUser(tempAdminUser);
+                setShowAdminLogin(false);
+                setStatusMsg(`店長 ${tempAdminUser} 您好，已進入管理員模式`);
+            };
+
+            const handleCellClick = (name, date, currentData) => {
+                if (viewMode === 'shift') {
+                    const key = `${name}_${date}`;
+                    setSelectedCells(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]);
+                } else if (viewMode === 'edit') {
+                    initiateShiftUpdate(name, date, currentData);
+                }
+            };
+
+            const initiateShiftUpdate = (name, date, currentData) => {
+                if (!isAdmin && name !== currentUser) {
+                    alert("您只能畫自己的假喔！");
+                    return;
+                }
+
+                const currentType = currentData ? String(currentData.type) : "";
+
+                if (currentType === "休") {
+                    executeShiftUpdate(name, date, "");
+                    return;
+                }
+
+                const userRecord = scheduleData.schedule.find(u => u.name === name);
+                const userTitle = userRecord ? (userRecord.title || "") : "";
+                const userStore = userRecord ? (userRecord.store || "") : "";
+                
+                const storeInfo = storesConfig.find(s => s.store === userStore);
+                const maxSimLeave = storeInfo ? parseInt(storeInfo.maxSimLeave) || 1 : 1;
+                const minMandLeave = storeInfo ? parseInt(storeInfo.minMandLeave) || 4 : 4;
+
+                if (!isAdmin && (!userTitle.includes("店長"))) {
+                    const othersOnLeave = scheduleData.schedule.filter(u => 
+                        u.name !== name && 
+                        u.store === userStore && 
+                        (u.shifts[date] && u.shifts[date].type === "休")
+                    ).length;
+
+                    if (othersOnLeave >= maxSimLeave) {
+                        alert(`❌ 排休限制：\n${userStore}店已有 ${othersOnLeave} 人排休，\n已達該店同時休假上限 (${maxSimLeave} 人)。`);
+                        return; 
+                    }
+                }
+
+                const currentRestCount = userRecord ? Object.values(userRecord.shifts).filter(v => v && v.type === "休").length : 0;
+                const isMandatory = isAdmin ? false : (currentRestCount >= minMandLeave);
+                
+                setModalConfig({ isOpen: true, name, date, isMandatory, minLimit: minMandLeave });
+            };
+
+            const executeShiftUpdate = async (name, date, newType, reason = "") => {
+                setScheduleData(prev => ({
+                    ...prev,
+                    schedule: prev.schedule.map(u => u.name === name ? {
+                        ...u, shifts: { ...u.shifts, [date]: { type: newType, note: reason } }
+                    } : u)
+                }));
+                setModalConfig({ isOpen: false, name: "", date: "", isMandatory: false });
+
+                try {
+                    const response = await fetch(APPS_SCRIPT_URL, {
+                        method: "POST",
+                        headers: { "Content-Type": "text/plain;charset=utf-8" },
+                        body: JSON.stringify({ action: "updateShift", sheetName: currentMonth, name, date, type: newType, reason })
+                    });
+                    const result = await response.json();
+                    if (result.status !== "success") {
+                        alert("更新失敗：" + result.message);
+                        fetchSchedule(currentMonth);
+                    }
+                } catch (e) {
+                    alert("連線失敗，無法儲存");
+                }
+            };
+
+            const handleBatchSave = async () => {
+                if (selectedCells.length === 0) return;
+                
+                const updates = selectedCells.map(key => {
+                    const [name, date] = key.split('_');
+                    return { name, date, type: batchShiftType };
+                });
+
+                setScheduleData(prev => {
+                    const newSchedule = JSON.parse(JSON.stringify(prev.schedule));
+                    updates.forEach(u => {
+                        const userIdx = newSchedule.findIndex(user => user.name === u.name);
+                        if (userIdx > -1) {
+                            newSchedule[userIdx].shifts[u.date] = { type: u.type, note: "" };
+                        }
+                    });
+                    return { ...prev, schedule: newSchedule };
+                });
+
+                setSelectedCells([]);
+
+                try {
+                    const response = await fetch(APPS_SCRIPT_URL, {
+                        method: "POST",
+                        headers: { "Content-Type": "text/plain;charset=utf-8" },
+                        body: JSON.stringify({ action: "batchUpdateShifts", sheetName: currentMonth, updates })
+                    });
+                    const result = await response.json();
+                    if (result.status !== "success") {
+                        alert("批次更新失敗：" + result.message);
+                        fetchSchedule(currentMonth);
+                    }
+                } catch (e) {
+                    alert("連線失敗，無法儲存");
+                }
+            };
+
+            // 判斷該員工在當前月份是否該顯示
+            const isEmployeeVisibleInCurrentMonth = (emp) => {
+                const curM = parseMonthToNum(currentMonth);
+                if (!curM) return true; // 若無法解析月份，預設顯示以策安全
+                
+                const startM = parseMonthToNum(emp.startMonth) || 0;
+                const endM = parseMonthToNum(emp.endMonth) || 999999; 
+                
+                return curM >= startM && curM <= endM;
+            };
+
+            // 以「員工資料表」為基底，產生應顯示的人員名單
+            const visibleEmployees = useMemo(() => {
+                return employeesConfig.filter(isEmployeeVisibleInCurrentMonth);
+            }, [employeesConfig, currentMonth]);
+
+            // 下拉選單使用 visibleEmployees，確保即使班表沒有該員工，依然可以選擇
+            const userList = useMemo(() => visibleEmployees.map(u => u.name), [visibleEmployees]);
+
+            // 將員工設定與當月班表資料合併
+            const processedSchedule = useMemo(() => {
+                return visibleEmployees.map(emp => {
+                    const rawRecord = scheduleData.schedule.find(r => r.name === emp.name) || { shifts: {} };
+                    return { 
+                        name: emp.name, 
+                        title: emp.title,
+                        store: emp.store,
+                        shifts: rawRecord.shifts 
+                    };
+                }).filter(user => {
+                    if (filterStore === 'all') return true;
+                    if (user.title && user.title.includes("店長")) return true;
+                    return user.store === filterStore;
+                });
+            }, [visibleEmployees, scheduleData.schedule, filterStore]);
+
+            const currentLoggedInUserData = useMemo(() => processedSchedule.find(u => u.name === currentUser), [processedSchedule, currentUser]);
+
+            const goToCurrentMonth = () => {
+                const now = new Date();
+                const y = now.getFullYear();
+                const m = now.getMonth() + 1;
+                const mPad = String(m).padStart(2, '0');
+                
+                const possibleTargets = [`${y}年${m}月`, `${y}年${mPad}月`, `${y}-${mPad}`, `${y}-${m}`, `${y}${mPad}`, `${y}/${mPad}`, `${y}/${m}`];
+                const target = months.find(month => possibleTargets.includes(month));
+                
+                if (target) {
+                    setCurrentMonth(target);
+                } else {
+                    if (months.length > 0) {
+                        setCurrentMonth(months[months.length - 1]);
+                        alert(`系統中找不到 ${y}年${m}月 的專屬工作表，已為您跳至最新月份。`);
+                    } else {
+                        alert(`系統中找不到本月份的班表資料`);
+                    }
+                }
+            };
+
+            const formatDate = (dateStr) => {
+                let safeStr = typeof dateStr === 'string' ? dateStr.replace(/-/g, "/").trim() : String(dateStr);
+                if (!/^\d{4}/.test(safeStr)) {
+                     const yearMatch = currentMonth ? currentMonth.match(/\d{4}/) : null;
+                     const year = yearMatch ? yearMatch[0] : new Date().getFullYear();
+                     safeStr = `${year}/${safeStr}`;
+                }
+                const date = new Date(safeStr);
+                if (isNaN(date.getTime())) {
+                    return <div className="flex flex-col items-center justify-center h-full"><span className="text-[10px] text-red-300">Err</span></div>;
+                }
+                const day = date.getDate();
+                const month = date.getMonth() + 1;
+                const weekDay = ["日","一","二","三","四","五","六"][date.getDay()];
+                const isWeekend = weekDay === '六' || weekDay === '日';
+                return (
+                    <div className="flex flex-col items-center justify-center h-full">
+                        <span className="text-[10px] text-slate-400 leading-none mb-1">{month}月</span>
+                        <span className={`text-sm font-bold leading-none ${isWeekend ? 'text-red-500' : 'text-slate-700'}`}>{day}</span>
+                        <span className={`text-[10px] mt-1 leading-none ${isWeekend ? 'text-red-400' : 'text-slate-400'}`}>{weekDay}</span>
+                    </div>
+                );
+            };
+
+            const handleOpenExport = () => {
+                if (!currentUser || !currentLoggedInUserData) {
+                    alert("請先選擇要匯出班表的員工姓名");
+                    return;
+                }
+                setShowCalendarModal(true);
+            };
+
+            // 動態產生分店過濾器
+            const dynamicStoreFilters = useMemo(() => {
+                const filters = [{ id: 'all', label: '全部分店' }];
+                if (storesConfig && storesConfig.length > 0) {
+                    storesConfig.forEach(s => {
+                        if (s.store) {
+                            filters.push({ id: s.store, label: s.store });
+                        }
+                    });
+                }
+                return filters;
+            }, [storesConfig]);
+
+            return (
+                <div className="flex flex-col h-screen bg-slate-100 text-slate-800 font-sans">
+                    
+                    <AdminLoginModal 
+                        isOpen={showAdminLogin}
+                        onClose={() => setShowAdminLogin(false)}
+                        onLogin={handleAdminSuccess}
+                        actualPassword={adminPassword}
+                        tempUser={tempAdminUser}
+                    />
+
+                    <AdminDashboardModal 
+                        isOpen={showAdminDashboard}
+                        onClose={() => setShowAdminDashboard(false)}
+                        storesConfig={storesConfig}
+                        employeesConfig={employeesConfig}
+                        shiftsConfig={shiftsConfig}
+                        colorsConfig={colorsConfig}
+                        refreshConfig={initApp}
+                    />
+                    
+                    <ReasonModal 
+                        isOpen={modalConfig.isOpen}
+                        onClose={() => setModalConfig({...modalConfig, isOpen: false})}
+                        onConfirm={(reason) => executeShiftUpdate(modalConfig.name, modalConfig.date, "休", reason)}
+                        date={modalConfig.date}
+                        isMandatory={modalConfig.isMandatory}
+                        minLimit={modalConfig.minLimit}
+                    />
+
+                    <CalendarExportModal 
+                        isOpen={showCalendarModal}
+                        onClose={() => setShowCalendarModal(false)}
+                        userData={currentLoggedInUserData}
+                        monthStr={currentMonth}
+                        scheduleDates={scheduleData.dates}
+                        rawSchedule={scheduleData.schedule}
+                        shiftsConfig={shiftsConfig}
+                    />
+
+                    <header className={`text-white shadow-lg z-40 shrink-0 transition-colors duration-500 ${isAdmin ? 'bg-slate-900' : 'bg-slate-800'}`}>
+                        <div className="flex items-center justify-between px-4 py-3">
+                            <div className="flex items-center gap-2">
+                                <div className={`${isAdmin ? 'bg-amber-500' : 'bg-blue-600'} w-8 h-8 rounded-lg flex items-center justify-center shadow-inner transition-colors duration-500`}>
+                                    <i className={`fa-solid ${isAdmin ? 'fa-user-shield' : 'fa-calendar-check'} text-white text-sm`}></i>
+                                </div>
+                                <span className="font-bold text-lg tracking-wide text-slate-100">
+                                    {isAdmin ? "排班系統 (管理員)" : "排班系統"}
+                                </span>
+                            </div>
+                            <div className="flex items-center gap-3">
+                                {isAdmin && (
+                                    <button onClick={() => setShowAdminDashboard(true)} className="hidden md:flex text-xs bg-slate-700 hover:bg-slate-600 border border-slate-600 text-white px-3 py-1.5 rounded-full font-bold shadow transition items-center">
+                                        <i className="fa-solid fa-cogs mr-1"></i>管理後台
+                                    </button>
+                                )}
+                                <button 
+                                    onClick={() => setShowFilters(!showFilters)}
+                                    className={`md:hidden p-2 rounded-full transition-colors ${showFilters ? 'bg-slate-700 text-blue-400' : 'hover:bg-slate-700 text-slate-300'}`}
+                                >
+                                    <i className="fa-solid fa-filter"></i>
+                                </button>
+                                <div className="hidden md:block text-xs bg-slate-700 text-slate-200 px-3 py-1 rounded-full border border-slate-600">
+                                    {currentMonth || "Loading..."}
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div className={`md:hidden ${isAdmin ? 'bg-slate-900' : 'bg-slate-800'} overflow-hidden transition-all duration-300 ease-in-out border-b border-slate-700 ${showFilters ? 'max-h-[400px]' : 'max-h-0'}`}>
+                            <div className="p-4 space-y-3">
+                                {isAdmin && (
+                                    <button onClick={() => {setShowAdminDashboard(true); setShowFilters(false);}} className="w-full text-sm bg-slate-700 hover:bg-slate-600 border border-slate-600 text-white px-4 py-2 rounded-lg font-bold shadow transition flex items-center justify-center">
+                                        <i className="fa-solid fa-cogs mr-2"></i>進入管理後台
+                                    </button>
+                                )}
+                                <div className="flex bg-slate-700 rounded-lg p-1 border border-slate-600 flex-wrap">
+                                    {dynamicStoreFilters.map(filter => (
+                                        <button
+                                            key={filter.id}
+                                            onClick={() => setFilterStore(filter.id)}
+                                            className={`flex-1 py-2 text-xs font-medium rounded-md transition-all ${filterStore === filter.id ? 'bg-blue-600 text-white shadow' : 'text-slate-400'}`}
+                                        >
+                                            {filter.label.replace('全部', '') || '全部'}
+                                        </button>
+                                    ))}
+                                </div>
+                                <div className="flex items-center gap-2 bg-slate-700 rounded-lg p-2 border border-slate-600">
+                                    <span className="text-slate-400 text-xs">檢視比例:</span>
+                                    <select 
+                                        value={zoomLevel} 
+                                        onChange={(e) => setZoomLevel(e.target.value)}
+                                        className="flex-1 bg-transparent text-slate-200 text-sm outline-none border-none p-0"
+                                    >
+                                        <option value="1">100%</option>
+                                        <option value="0.75">75%</option>
+                                        <option value="0.5">50%</option>
+                                    </select>
+                                </div>
+                                <div className="flex gap-2">
+                                    <select 
+                                        value={currentMonth} 
+                                        onChange={(e) => setCurrentMonth(e.target.value)}
+                                        className="flex-1 bg-slate-700 border border-slate-600 text-slate-200 rounded-lg py-2 px-3 text-sm"
+                                    >
+                                        {months.map(m => <option key={m} value={m}>{m}</option>)}
+                                    </select>
+                                    <button onClick={goToCurrentMonth} className="bg-slate-700 border border-slate-600 text-blue-400 px-4 py-2 rounded-lg text-sm font-medium">
+                                        <i className="fa-solid fa-calendar-day"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </header>
+
+                    <main className="flex-1 overflow-hidden flex flex-col relative w-full max-w-7xl mx-auto shadow-xl bg-white md:my-4 md:rounded-xl">
+                        
+                        <div className="hidden md:flex items-center justify-between p-4 bg-white border-b border-slate-200 gap-4">
+                            <div className="flex gap-3 items-center">
+                                <div className="flex bg-slate-100 p-1 rounded-lg">
+                                    {dynamicStoreFilters.map(filter => (
+                                        <button
+                                            key={filter.id}
+                                            onClick={() => setFilterStore(filter.id)}
+                                            className={`px-3 py-1.5 text-sm rounded-md transition-all ${filterStore === filter.id ? 'bg-white shadow-sm text-blue-700 font-bold' : 'text-slate-500 hover:text-slate-700'}`}
+                                        >
+                                            {filter.label}
+                                        </button>
+                                    ))}
+                                </div>
+                                <button onClick={goToCurrentMonth} className="text-slate-500 hover:text-blue-600 text-sm px-2 transition-colors">
+                                    <i className="fa-solid fa-calendar-day mr-1"></i>跳至本月份
+                                </button>
+                                <div className="h-6 w-px bg-slate-200 mx-1"></div>
+                                <div className="flex items-center gap-2">
+                                    <i className="fa-solid fa-magnifying-glass-plus text-slate-400 text-xs"></i>
+                                    <select 
+                                        value={zoomLevel} 
+                                        onChange={(e) => setZoomLevel(e.target.value)}
+                                        className="bg-transparent text-slate-700 text-sm outline-none font-medium border-none p-0 w-20"
+                                    >
+                                        <option value="1">100%</option>
+                                        <option value="0.75">75%</option>
+                                        <option value="0.5">50%</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div className="flex items-center gap-4">
+                                <div className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200">
+                                    <label className="text-xs text-slate-500 font-bold">我是:</label>
+                                    <select 
+                                        value={currentUser} 
+                                        onChange={handleUserChange}
+                                        className="bg-transparent text-slate-700 text-sm outline-none font-medium border-none p-0 w-24"
+                                    >
+                                        <option value="">選擇員工</option>
+                                        {userList.map(u => <option key={u} value={u}>{u}</option>)}
+                                    </select>
+                                </div>
+                                <div className="h-6 w-px bg-slate-200"></div>
+                                
+                                <button 
+                                    onClick={handleOpenExport}
+                                    className="px-3 py-1.5 text-sm rounded-md transition-all bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 font-bold flex items-center"
+                                >
+                                    <i className="fa-regular fa-image mr-1.5"></i>個人圖檔
+                                </button>
+
+                                <div className="flex bg-slate-100 p-1 rounded-lg">
+                                    <button 
+                                        onClick={() => {setViewMode("view"); setSelectedCells([]);}}
+                                        className={`px-3 py-1.5 text-sm rounded-md transition-all ${viewMode === 'view' ? 'bg-white shadow text-slate-800 font-bold' : 'text-slate-500'}`}
+                                    >
+                                        瀏覽
+                                    </button>
+                                    <button 
+                                        onClick={() => {setViewMode("edit"); setSelectedCells([]);}}
+                                        className={`px-3 py-1.5 text-sm rounded-md transition-all ${viewMode === 'edit' ? 'bg-blue-600 shadow text-white font-bold' : 'text-slate-500'}`}
+                                    >
+                                        畫休
+                                    </button>
+                                    {isAdmin && (
+                                        <button 
+                                            onClick={() => {setViewMode("shift"); setSelectedCells([]);}}
+                                            className={`px-3 py-1.5 text-sm rounded-md transition-all ${viewMode === 'shift' ? 'bg-amber-500 shadow text-white font-bold' : 'text-slate-500'}`}
+                                        >
+                                            排班
+                                        </button>
+                                    )}
+                                </div>
+                                <select 
+                                    value={currentMonth} 
+                                    onChange={(e) => setCurrentMonth(e.target.value)}
+                                    className="bg-white border border-slate-200 text-slate-700 py-1.5 px-3 rounded-lg text-sm font-bold shadow-sm outline-none hover:border-blue-400 transition-colors"
+                                >
+                                    {months.map(m => <option key={m} value={m}>{m}</option>)}
+                                </select>
+                            </div>
+                        </div>
+
+                        {statusMsg && (
+                            <div className="bg-blue-50 text-blue-600 px-4 py-2 text-xs flex justify-between items-center border-b border-blue-100 animate-pulse">
+                                <span><i className="fa-solid fa-circle-info mr-1"></i>{statusMsg}</span>
+                                <button onClick={() => setStatusMsg("")}><i className="fa-solid fa-xmark"></i></button>
+                            </div>
+                        )}
+
+                        <div className="md:hidden flex justify-between items-center px-3 py-3 bg-white border-b border-slate-200 shadow-sm shrink-0">
+                            <div className="flex items-center gap-2 flex-1 bg-slate-50 px-2 py-1.5 rounded-lg border border-slate-100 min-w-0 mr-2">
+                                <i className={`fa-solid ${isAdmin ? 'fa-user-shield text-amber-500' : 'fa-user text-slate-400'} text-[10px]`}></i>
+                                <select 
+                                    value={currentUser} 
+                                    onChange={handleUserChange}
+                                    className="w-full bg-transparent text-xs font-bold text-slate-700 outline-none border-none p-0 truncate"
+                                >
+                                    <option value="">請選擇姓名</option>
+                                    {userList.map(u => <option key={u} value={u}>{u}</option>)}
+                                </select>
+                            </div>
+                            
+                            <button 
+                                onClick={handleOpenExport}
+                                className="mr-2 px-2.5 py-1.5 rounded-lg text-[10px] font-bold border transition-all shadow-sm bg-emerald-50 border-emerald-200 text-emerald-700 flex items-center justify-center shrink-0"
+                            >
+                                <i className="fa-regular fa-image"></i>
+                            </button>
+
+                            <div className="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200 shrink-0">
+                                <button 
+                                    onClick={() => {setViewMode('view'); setSelectedCells([]);}}
+                                    className={`px-2 py-1 rounded text-[10px] font-bold transition-all shadow-sm ${viewMode === 'view' ? 'bg-white text-slate-700' : 'bg-transparent text-slate-500 shadow-none'}`}
+                                >
+                                    瀏覽
+                                </button>
+                                <button 
+                                    onClick={() => {setViewMode('edit'); setSelectedCells([]);}}
+                                    className={`px-2 py-1 rounded text-[10px] font-bold transition-all shadow-sm ${viewMode === 'edit' ? 'bg-blue-600 text-white' : 'bg-transparent text-slate-500 shadow-none'}`}
+                                >
+                                    畫休
+                                </button>
+                                {isAdmin && (
+                                    <button 
+                                        onClick={() => {setViewMode('shift'); setSelectedCells([]);}}
+                                        className={`px-2 py-1 rounded text-[10px] font-bold transition-all shadow-sm ${viewMode === 'shift' ? 'bg-amber-500 text-white' : 'bg-transparent text-slate-500 shadow-none'}`}
+                                    >
+                                        排班
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+
+                        <div className="flex-1 overflow-hidden relative bg-white">
+                            {initLoading || scheduleLoading ? (
+                                <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/80 z-40 backdrop-blur-[1px]">
+                                    <div className="animate-spin rounded-full h-8 w-8 border-2 border-blue-600 border-t-transparent mb-3"></div>
+                                    <span className="text-xs text-slate-500 font-medium">資料同步中...</span>
+                                </div>
+                            ) : null}
+
+                            {viewMode === 'shift' && (
+                                <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 bg-slate-800/95 backdrop-blur-sm text-white shadow-[0_10px_40px_rgba(0,0,0,0.3)] rounded-full px-5 py-3 flex items-center gap-3 z-[60] animate-slideIn border border-slate-600 w-[90%] md:w-auto overflow-x-auto no-scrollbar">
+                                    <div className="flex items-center bg-slate-700 px-3 py-1.5 rounded-full text-xs font-bold whitespace-nowrap">
+                                        已選 <span className="text-blue-400 mx-1">{selectedCells.length}</span> 格
+                                    </div>
+                                    <select 
+                                        value={batchShiftType} 
+                                        onChange={(e) => setBatchShiftType(e.target.value)}
+                                        className="bg-slate-900 border border-slate-600 rounded-lg px-3 py-1.5 text-sm font-bold text-white outline-none focus:ring-2 focus:ring-blue-500 shrink-0"
+                                    >
+                                        <option value="">清除班別</option>
+                                        <option value="休">休假 (休)</option>
+                                        {shiftsConfig.map(s => <option key={s.type} value={s.type}>{s.type}</option>)}
+                                    </select>
+                                    <button 
+                                        onClick={handleBatchSave}
+                                        disabled={selectedCells.length === 0}
+                                        className="bg-blue-600 px-4 py-1.5 rounded-full text-sm font-bold shadow hover:bg-blue-500 transition disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap shrink-0"
+                                    >
+                                        <i className="fa-solid fa-check mr-1.5"></i>儲存
+                                    </button>
+                                </div>
+                            )}
+
+                            {scheduleData.dates.length > 0 ? (
+                                <div ref={tableContainerRef} className="h-full overflow-auto custom-scroll">
+                                    <table className="border-collapse w-full min-w-max" style={{ zoom: zoomLevel }}>
+                                        <thead className="sticky top-0 z-30 bg-slate-50 shadow-sm">
+                                            <tr>
+                                                <th className="sticky left-0 z-40 bg-slate-50 p-0 border-b border-slate-200 border-r min-w-[100px] w-[100px] shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">
+                                                    <div className="h-14 flex items-center justify-center text-xs text-slate-500 font-bold tracking-wider">
+                                                        員工姓名
+                                                    </div>
+                                                </th>
+                                                {scheduleData.dates.map(date => (
+                                                    <th key={date} className="bg-slate-50 p-1 min-w-[50px] w-[50px] border-b border-r border-slate-100 last:border-r-0 h-14 align-top">
+                                                        {formatDate(date)}
+                                                    </th>
+                                                ))}
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-50">
+                                            {processedSchedule.length === 0 ? (
+                                                <tr>
+                                                    <td colSpan={scheduleData.dates.length + 1} className="text-center py-10 text-slate-400 text-sm">
+                                                        <div className="flex flex-col items-center gap-2">
+                                                            <i className="fa-solid fa-filter-circle-xmark text-2xl opacity-50"></i>
+                                                            <span>沒有符合篩選條件的資料</span>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            ) : (
+                                                processedSchedule.map((user) => {
+                                                    const isMe = user.name === currentUser;
+                                                    const isOthers = currentUser !== "" && !isMe;
+                                                    
+                                                    const rowBg = isMe ? "bg-blue-50/80" : "bg-white";
+                                                    const nameColor = isMe ? "text-blue-800 font-black text-[15px]" : "text-slate-700 font-medium text-sm";
+                                                    const rowOpacity = (isOthers && viewMode !== 'shift') ? "opacity-30 hover:opacity-50 grayscale-[50%]" : "opacity-100";
+                                                    const activeRing = (isMe && viewMode !== 'shift') ? "relative z-20 shadow-[0_4px_10px_rgba(59,130,246,0.1)] ring-2 ring-blue-400" : "";
+                                                    
+                                                    const canEdit = viewMode === 'edit' && (isMe || isAdmin);
+
+                                                    return (
+                                                        <tr key={user.name} className={`${rowBg} ${rowOpacity} ${activeRing} hover:bg-slate-50 transition-all duration-300`}>
+                                                            <td className={`sticky left-0 ${isMe ? 'z-30' : 'z-20'} ${rowBg} p-0 border-r border-slate-100 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)] transition-colors duration-300`}>
+                                                                <div className="h-12 flex items-center px-4 relative">
+                                                                    {isMe && <div className="w-2 h-full bg-blue-600 absolute left-0 top-0 shadow-[2px_0_5px_rgba(59,130,246,0.5)]"></div>}
+                                                                    <div className="flex items-center h-full w-full">
+                                                                        <span className={`truncate w-full transition-all duration-300 ${nameColor}`}>
+                                                                            {user.name || "未命名"}
+                                                                        </span>
+                                                                    </div>
+                                                                </div>
+                                                            </td>
+                                                            {scheduleData.dates.map(date => (
+                                                                <td key={`${user.name}-${date}`} className={`p-1 border-r ${isMe ? 'border-blue-100' : 'border-slate-50'} text-center h-12`}>
+                                                                    <ShiftBadge 
+                                                                        data={user.shifts[date]} 
+                                                                        isEditable={canEdit}
+                                                                        isSmall={true}
+                                                                        viewMode={viewMode}
+                                                                        shiftsConfig={shiftsConfig}
+                                                                        isSelected={selectedCells.includes(`${user.name}_${date}`)}
+                                                                        onClick={() => handleCellClick(user.name, date, user.shifts[date])}
+                                                                    />
+                                                                </td>
+                                                            ))}
+                                                        </tr>
+                                                    );
+                                                })
+                                            )}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            ) : (
+                                <div className="flex flex-col items-center justify-center h-full text-slate-400">
+                                    <i className="fa-regular fa-calendar-xmark text-4xl mb-3 opacity-50"></i>
+                                    <span className="text-sm font-medium">本月尚無班表資料</span>
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="bg-white border-t border-slate-200 p-3 shrink-0 overflow-x-auto no-scrollbar">
+                            <div className="flex justify-start md:justify-center gap-4 min-w-max px-2">
+                                {shiftsConfig.map(s => (
+                                    <div key={s.type} className="flex items-center text-xs text-slate-600">
+                                        <span className="w-3 h-3 rounded shadow-sm border border-black/10 mr-1.5" style={{backgroundColor: s.hex || '#E2E8F0'}}></span>{s.type}
+                                    </div>
+                                ))}
+                                <div className="flex items-center text-xs text-slate-600"><span className="w-3 h-3 rounded bg-yellow-100 border border-yellow-200 shadow-sm mr-1.5"></span>休假</div>
+                            </div>
+                        </div>
+
+                    </main>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
