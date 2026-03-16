@@ -74,7 +74,7 @@
 
     <script type="text/babel">
         // ================= CONFIGURATION =================
-        const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbx4zVsjdH3PFeJLqhruTZvI_fyJQ5tLvJApGYLN9r5XaPzM8DyQ3VUnQ5cRBlf2BDlF/exec"; 
+        const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwSIcgdBwkeJuac2ODn1LkEVfjdrGQT9qwnphPsZm2NT_8nAhhSHHyumMXSHX1qIq4fug/exec"; 
         // =================================================
 
         const { useState, useEffect, useMemo, useRef } = React;
@@ -102,45 +102,27 @@
             return null;
         };
 
-        const AdminLoginModal = ({ isOpen, onClose, onLogin, tempUser }) => {
+        const AdminLoginModal = ({ isOpen, onClose, onLogin, actualPassword, tempUser }) => {
             const [password, setPassword] = useState("");
             const [error, setError] = useState("");
-            const [isVerifying, setIsVerifying] = useState(false);
             const inputRef = useRef(null);
 
             useEffect(() => {
                 if (isOpen) {
                     setPassword("");
                     setError("");
-                    setIsVerifying(false);
                     setTimeout(() => inputRef.current?.focus(), 100);
                 }
             }, [isOpen]);
 
             if (!isOpen) return null;
 
-            const handleSubmit = async () => {
-                if (!password) return;
-                setIsVerifying(true);
-                try {
-                    const response = await fetch(APPS_SCRIPT_URL, {
-                        method: "POST",
-                        headers: { "Content-Type": "text/plain;charset=utf-8" },
-                        body: JSON.stringify({ action: "verifyAdmin", password: password })
-                    });
-                    const result = await response.json();
-                    
-                    if (result.status === "success") {
-                        onLogin();
-                    } else {
-                        setError(result.message || "密碼錯誤");
-                        setPassword("");
-                        setTimeout(() => inputRef.current?.focus(), 100);
-                    }
-                } catch (e) {
-                    setError("連線失敗，請稍後再試");
-                } finally {
-                    setIsVerifying(false);
+            const handleSubmit = () => {
+                if (password === actualPassword) {
+                    onLogin();
+                } else {
+                    setError("密碼錯誤");
+                    setPassword("");
                 }
             };
 
@@ -162,17 +144,12 @@
                                 value={password}
                                 onChange={(e) => { setPassword(e.target.value); setError(""); }}
                                 className="w-full border rounded-lg px-3 py-2 text-center text-lg tracking-widest focus:outline-none focus:ring-2 focus:ring-blue-500 border-slate-300"
-                                onKeyDown={(e) => e.key === 'Enter' && !isVerifying && handleSubmit()}
+                                onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
                                 placeholder="請輸入密碼"
-                                disabled={isVerifying}
                             />
                             {error && <p className="text-red-500 text-xs mt-2 text-center font-bold">{error}</p>}
-                            <button 
-                                onClick={handleSubmit} 
-                                disabled={isVerifying}
-                                className="w-full mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-bold shadow-md hover:bg-blue-700 transition-colors disabled:opacity-50"
-                            >
-                                {isVerifying ? '驗證中...' : '登入管理模式'}
+                            <button onClick={handleSubmit} className="w-full mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-bold shadow-md hover:bg-blue-700 transition-colors">
+                                登入管理模式
                             </button>
                         </div>
                     </div>
@@ -620,7 +597,7 @@
                                                             </div>
                                                             <div className="flex-1 flex flex-col items-center justify-center mt-0.5 w-full h-full overflow-hidden gap-0.5 px-0.5 pb-0.5">
                                                                 {showEvents && cell.calData && cell.calData.type && (
-                                                                    <div className="w-full text-center text-[7px] md:text-[9px] text-amber-700 font-bold truncate leading-tight bg-amber-50 rounded px-0.5">
+                                                                    <div className="w-full text-center text-[7px] md:text-[9px] text-amber-700 font-bold whitespace-normal break-words leading-tight line-clamp-2 bg-amber-50 rounded px-0.5">
                                                                         {cell.calData.type}
                                                                     </div>
                                                                 )}
@@ -749,6 +726,7 @@
             const [employeesConfig, setEmployeesConfig] = useState([]);
             const [shiftsConfig, setShiftsConfig] = useState([]);
             const [colorsConfig, setColorsConfig] = useState([]);
+            const [adminPassword, setAdminPassword] = useState("");
             
             const [currentUser, setCurrentUser] = useState("");
             const [tempAdminUser, setTempAdminUser] = useState("");
@@ -790,6 +768,7 @@
                         setEmployeesConfig(resConfig.employees || []);
                         setShiftsConfig(resConfig.shifts || []);
                         setColorsConfig(resConfig.colors || []);
+                        setAdminPassword(resConfig.adminPassword || "");
                     } else {
                         setStatusMsg(`⚠️ 後端連線異常，請確認 Apps Script 是否已更新並發佈為新版本！`);
                     }
@@ -1131,6 +1110,7 @@
                         isOpen={showAdminLogin}
                         onClose={() => setShowAdminLogin(false)}
                         onLogin={handleAdminSuccess}
+                        actualPassword={adminPassword}
                         tempUser={tempAdminUser}
                     />
 
@@ -1437,7 +1417,7 @@
                                             {calendarRecord && (
                                                 <tr className="bg-amber-50/60 hover:bg-amber-50 transition-all duration-300">
                                                     <td className="sticky left-0 z-30 bg-amber-50 p-0 border-r border-slate-200 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">
-                                                        <div className="h-12 flex items-center px-4 border-l-4 border-amber-400">
+                                                        <div className="h-full min-h-[3rem] flex items-center px-4 border-l-4 border-amber-400 py-1">
                                                             <span className="text-amber-800 font-bold text-sm">
                                                                 <i className="fa-regular fa-calendar-check mr-2 opacity-70"></i>行事曆
                                                             </span>
@@ -1450,16 +1430,16 @@
                                                         return (
                                                             <td 
                                                                 key={`calendar-${date}`} 
-                                                                className={`p-1 border-r border-amber-100/50 text-center h-12 align-middle ${isShiftMode ? 'cursor-pointer hover:bg-amber-200/50 transition-colors' : ''}`}
+                                                                className={`p-1 border-r border-amber-100/50 text-center align-middle ${isShiftMode ? 'cursor-pointer hover:bg-amber-200/50 transition-colors' : ''}`}
                                                                 onClick={() => isShiftMode && setCalEventModal({ isOpen: true, date, currentText: text })}
                                                             >
                                                                 {text ? (
-                                                                    <div className="text-[10px] md:text-xs font-bold text-amber-800 bg-amber-200/60 rounded px-1.5 py-1 w-full truncate border border-amber-300/50 shadow-sm" title={text}>
+                                                                    <div className="text-[10px] md:text-xs font-bold text-amber-800 bg-amber-200/60 rounded px-1.5 py-1 w-full whitespace-normal break-words leading-tight border border-amber-300/50 shadow-sm" title={text}>
                                                                         {text}
                                                                     </div>
                                                                 ) : (
                                                                     isShiftMode && (
-                                                                        <div className="flex items-center justify-center w-full h-full text-amber-400/50 hover:text-amber-500">
+                                                                        <div className="flex items-center justify-center w-full min-h-[2rem] h-full text-amber-400/50 hover:text-amber-500">
                                                                             <i className="fa-solid fa-pen-to-square text-xs"></i>
                                                                         </div>
                                                                     )
