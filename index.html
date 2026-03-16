@@ -74,7 +74,7 @@
 
     <script type="text/babel">
         // ================= CONFIGURATION =================
-        const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwSIcgdBwkeJuac2ODn1LkEVfjdrGQT9qwnphPsZm2NT_8nAhhSHHyumMXSHX1qIq4fug/exec"; 
+        const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbx4zVsjdH3PFeJLqhruTZvI_fyJQ5tLvJApGYLN9r5XaPzM8DyQ3VUnQ5cRBlf2BDlF/exec"; 
         // =================================================
 
         const { useState, useEffect, useMemo, useRef } = React;
@@ -102,27 +102,45 @@
             return null;
         };
 
-        const AdminLoginModal = ({ isOpen, onClose, onLogin, actualPassword, tempUser }) => {
+        const AdminLoginModal = ({ isOpen, onClose, onLogin, tempUser }) => {
             const [password, setPassword] = useState("");
             const [error, setError] = useState("");
+            const [isVerifying, setIsVerifying] = useState(false);
             const inputRef = useRef(null);
 
             useEffect(() => {
                 if (isOpen) {
                     setPassword("");
                     setError("");
+                    setIsVerifying(false);
                     setTimeout(() => inputRef.current?.focus(), 100);
                 }
             }, [isOpen]);
 
             if (!isOpen) return null;
 
-            const handleSubmit = () => {
-                if (password === actualPassword) {
-                    onLogin();
-                } else {
-                    setError("密碼錯誤");
-                    setPassword("");
+            const handleSubmit = async () => {
+                if (!password) return;
+                setIsVerifying(true);
+                try {
+                    const response = await fetch(APPS_SCRIPT_URL, {
+                        method: "POST",
+                        headers: { "Content-Type": "text/plain;charset=utf-8" },
+                        body: JSON.stringify({ action: "verifyAdmin", password: password })
+                    });
+                    const result = await response.json();
+                    
+                    if (result.status === "success") {
+                        onLogin();
+                    } else {
+                        setError(result.message || "密碼錯誤");
+                        setPassword("");
+                        setTimeout(() => inputRef.current?.focus(), 100);
+                    }
+                } catch (e) {
+                    setError("連線失敗，請稍後再試");
+                } finally {
+                    setIsVerifying(false);
                 }
             };
 
@@ -144,12 +162,17 @@
                                 value={password}
                                 onChange={(e) => { setPassword(e.target.value); setError(""); }}
                                 className="w-full border rounded-lg px-3 py-2 text-center text-lg tracking-widest focus:outline-none focus:ring-2 focus:ring-blue-500 border-slate-300"
-                                onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
+                                onKeyDown={(e) => e.key === 'Enter' && !isVerifying && handleSubmit()}
                                 placeholder="請輸入密碼"
+                                disabled={isVerifying}
                             />
                             {error && <p className="text-red-500 text-xs mt-2 text-center font-bold">{error}</p>}
-                            <button onClick={handleSubmit} className="w-full mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-bold shadow-md hover:bg-blue-700 transition-colors">
-                                登入管理模式
+                            <button 
+                                onClick={handleSubmit} 
+                                disabled={isVerifying}
+                                className="w-full mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-bold shadow-md hover:bg-blue-700 transition-colors disabled:opacity-50"
+                            >
+                                {isVerifying ? '驗證中...' : '登入管理模式'}
                             </button>
                         </div>
                     </div>
@@ -645,7 +668,7 @@
             const [employeesConfig, setEmployeesConfig] = useState([]);
             const [shiftsConfig, setShiftsConfig] = useState([]);
             const [colorsConfig, setColorsConfig] = useState([]);
-            const [adminPassword, setAdminPassword] = useState("");
+            // (已移除) adminPassword 前端狀態
             
             const [currentUser, setCurrentUser] = useState("");
             const [tempAdminUser, setTempAdminUser] = useState("");
@@ -686,7 +709,7 @@
                         setEmployeesConfig(resConfig.employees || []);
                         setShiftsConfig(resConfig.shifts || []);
                         setColorsConfig(resConfig.colors || []);
-                        setAdminPassword(resConfig.adminPassword || "");
+                        // 不再從 getConfig 讀取密碼
                     } else {
                         setStatusMsg(`⚠️ 後端連線異常，請確認 Apps Script 是否已更新並發佈為新版本！`);
                     }
@@ -974,7 +997,6 @@
                         isOpen={showAdminLogin}
                         onClose={() => setShowAdminLogin(false)}
                         onLogin={handleAdminSuccess}
-                        actualPassword={adminPassword}
                         tempUser={tempAdminUser}
                     />
 
