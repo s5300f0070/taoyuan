@@ -123,10 +123,11 @@
                 if (!password) return;
                 setIsVerifying(true);
                 try {
+                    // 使用 fetch 向後端驗證 API 請求比對
                     const response = await fetch(APPS_SCRIPT_URL, {
                         method: "POST",
                         headers: { "Content-Type": "text/plain;charset=utf-8" },
-                        body: JSON.stringify({ action: "verifyAdmin", password: password })
+                        body: JSON.stringify({ action: "verifyAdmin", password: password.trim() })
                     });
                     const result = await response.json();
                     
@@ -620,7 +621,7 @@
                                                             </div>
                                                             <div className="flex-1 flex flex-col items-center justify-center mt-0.5 w-full h-full overflow-hidden gap-0.5 px-0.5 pb-0.5">
                                                                 {showEvents && cell.calData && cell.calData.type && (
-                                                                    <div className="w-full text-center text-[7px] md:text-[9px] text-amber-700 font-bold truncate leading-tight bg-amber-50 rounded px-0.5">
+                                                                    <div className="w-full text-center text-[7px] md:text-[9px] text-amber-700 font-bold whitespace-normal break-all leading-tight bg-amber-50 rounded px-0.5 py-0.5">
                                                                         {cell.calData.type}
                                                                     </div>
                                                                 )}
@@ -1437,7 +1438,7 @@
                                             {calendarRecord && (
                                                 <tr className="bg-amber-50/60 hover:bg-amber-50 transition-all duration-300">
                                                     <td className="sticky left-0 z-30 bg-amber-50 p-0 border-r border-slate-200 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">
-                                                        <div className="h-12 flex items-center px-4 border-l-4 border-amber-400">
+                                                        <div className="h-full min-h-[3rem] flex items-center px-4 border-l-4 border-amber-400 py-1">
                                                             <span className="text-amber-800 font-bold text-sm">
                                                                 <i className="fa-regular fa-calendar-check mr-2 opacity-70"></i>行事曆
                                                             </span>
@@ -1450,16 +1451,16 @@
                                                         return (
                                                             <td 
                                                                 key={`calendar-${date}`} 
-                                                                className={`p-1 border-r border-amber-100/50 text-center h-12 align-middle ${isShiftMode ? 'cursor-pointer hover:bg-amber-200/50 transition-colors' : ''}`}
+                                                                className={`p-1 border-r border-amber-100/50 text-center align-middle ${isShiftMode ? 'cursor-pointer hover:bg-amber-200/50 transition-colors' : ''}`}
                                                                 onClick={() => isShiftMode && setCalEventModal({ isOpen: true, date, currentText: text })}
                                                             >
                                                                 {text ? (
-                                                                    <div className="text-[10px] md:text-xs font-bold text-amber-800 bg-amber-200/60 rounded px-1.5 py-1 w-full truncate border border-amber-300/50 shadow-sm" title={text}>
+                                                                    <div className="text-[10px] md:text-xs font-bold text-amber-800 bg-amber-200/60 rounded px-1.5 py-1 w-full min-h-[2rem] whitespace-normal break-all leading-tight border border-amber-300/50 shadow-sm flex items-center justify-center" title={text}>
                                                                         {text}
                                                                     </div>
                                                                 ) : (
                                                                     isShiftMode && (
-                                                                        <div className="flex items-center justify-center w-full h-full text-amber-400/50 hover:text-amber-500">
+                                                                        <div className="flex items-center justify-center w-full min-h-[2rem] h-full text-amber-400/50 hover:text-amber-500">
                                                                             <i className="fa-solid fa-pen-to-square text-xs"></i>
                                                                         </div>
                                                                     )
